@@ -1,0 +1,45 @@
+# Example docker-compose for ComfyUI with Manager
+# This builds the managed image and runs it
+
+version: "3.8"
+
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile.managed
+    container_name: comfyui-managed
+
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Environment configuration
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - IDLE_TIMEOUT_SECONDS=300        # 5 minutes idle timeout
+      - IDLE_CHECK_INTERVAL=30           # Check every 30 seconds
+      # Adjust this command if your ComfyUI setup is different:
+      - COMFYUI_START_CMD=python /root/ComfyUI/main.py --listen 127.0.0.1 --port 8189
+
+    # Port mapping: external 8188 -> internal 8188 (manager)
+    ports:
+      - "8188:8188"
+
+    # Volume mounts - adjust paths for your setup
+    volumes:
+      # Models directory
+      - /path/to/models:/root/ComfyUI/models
+      # Output directory
+      - /path/to/output:/root/ComfyUI/output
+      # Custom nodes
+      - /path/to/custom_nodes:/root/ComfyUI/custom_nodes
+      # Optional: persist ComfyUI settings
+      - /path/to/user:/root/ComfyUI/user
+
+    restart: unless-stopped

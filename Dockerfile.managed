@@ -1,0 +1,28 @@
+# Dockerfile for managed ComfyUI
+# Extends the YanWenKun ComfyUI-Docker image with auto-start/stop capability
+
+FROM yanwenkun/comfyui-boot:latest
+
+# Install manager dependencies
+RUN pip install --no-cache-dir flask requests gunicorn python-dotenv
+
+# Copy manager files
+COPY app.py /manager/
+COPY comfyui_manager.py /manager/
+COPY entrypoint.sh /manager/
+
+RUN chmod +x /manager/entrypoint.sh
+
+# Environment defaults
+ENV COMFYUI_HOST=127.0.0.1
+ENV COMFYUI_PORT=8189
+ENV COMFYUI_START_CMD="python /root/ComfyUI/main.py --listen 127.0.0.1 --port 8189"
+ENV MANAGER_PORT=8188
+ENV IDLE_TIMEOUT_SECONDS=300
+ENV IDLE_CHECK_INTERVAL=30
+
+# Expose manager port (ComfyUI runs internally on 8189)
+EXPOSE 8188
+
+# Use manager as entrypoint
+ENTRYPOINT ["/manager/entrypoint.sh"]

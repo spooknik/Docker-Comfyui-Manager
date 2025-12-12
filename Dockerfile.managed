@@ -1,7 +1,7 @@
 # Dockerfile for managed ComfyUI
 # Extends the YanWenKun ComfyUI-Docker image with auto-start/stop capability
 
-FROM yanwenkun/comfyui-boot:latest
+FROM yanwk/comfyui-boot:cu128-slim
 
 # Install manager dependencies
 RUN pip install --no-cache-dir flask requests gunicorn python-dotenv

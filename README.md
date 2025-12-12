@@ -10,9 +10,43 @@ A lightweight proxy application that sits in front of ComfyUI and automatically 
 - **Transparent proxy**: All ComfyUI requests are proxied seamlessly
 - **Activity tracking**: Any request to ComfyUI resets the idle timer
 
+## Quick Start with Docker Hub (Easiest for TrueNAS)
+
+Pull the pre-built image from Docker Hub:
+
+```bash
+docker pull <your-dockerhub-username>/comfyui-manager:latest
+
+docker run -d \
+  --gpus all \
+  -p 8188:8188 \
+  -v /path/to/models:/root/ComfyUI/models \
+  -v /path/to/output:/root/ComfyUI/output \
+  -v /path/to/custom_nodes:/root/ComfyUI/custom_nodes \
+  -e IDLE_TIMEOUT_SECONDS=300 \
+  --name comfyui-managed \
+  <your-dockerhub-username>/comfyui-manager:latest
+```
+
+**For TrueNAS Scale:**
+1. Go to Apps > Discover Apps > Custom App
+2. Configure:
+   - **Image Repository**: `<your-dockerhub-username>/comfyui-manager`
+   - **Image Tag**: `latest`
+   - **Port**: Map `8188` to your desired external port
+   - **GPU**: Enable GPU passthrough in Resources
+   - **Storage**: Mount your existing ComfyUI volumes:
+     - `/mnt/your-pool/comfyui/models` → `/root/ComfyUI/models`
+     - `/mnt/your-pool/comfyui/output` → `/root/ComfyUI/output`
+     - `/mnt/your-pool/comfyui/custom_nodes` → `/root/ComfyUI/custom_nodes`
+   - **Environment Variables**:
+     - `IDLE_TIMEOUT_SECONDS=300` (or your preferred timeout)
+
+3. Deploy and access at `http://your-truenas-ip:8188/manager`
+
 ## Installation with YanWenKun/ComfyUI-Docker
 
-### Option 1: Custom Dockerfile (Recommended)
+### Option 1: Custom Dockerfile (Recommended for Self-Build)
 
 Create a custom Dockerfile that extends the ComfyUI-Docker image:
 

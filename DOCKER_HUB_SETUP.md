@@ -92,12 +92,16 @@ The workflow creates these tags automatically:
 - Make sure the build completed successfully (green checkmark in Actions)
 - Check that the repository is public on Docker Hub (or your TrueNAS can access private repos)
 
-## Alternative: Manual Build and Push
+## Alternative: Manual Build and Push (Recommended for Large Images)
 
-If you prefer to build and push manually:
+Since the ComfyUI base image is very large (~10GB+), GitHub Actions free runners may run out of disk space. If you have a machine with Docker installed (and ideally a GPU to test), you can build and push manually:
 
 ```bash
-# Build the image
+# Clone your repo
+git clone https://github.com/<your-username>/Docker-Comfyui-Manager.git
+cd Docker-Comfyui-Manager
+
+# Build the image (this will take some time)
 docker build -f Dockerfile.managed -t <your-username>/comfyui-manager:latest .
 
 # Log in to Docker Hub
@@ -106,3 +110,5 @@ docker login
 # Push the image
 docker push <your-username>/comfyui-manager:latest
 ```
+
+**Note:** The build will download the large yanwenkun/comfyui-boot:latest base image (~10GB) so make sure you have enough disk space and a good internet connection.

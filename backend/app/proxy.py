@@ -5,7 +5,6 @@ Automatically starts the container when a request arrives.
 
 import asyncio
 import logging
-import re
 from typing import Optional
 from datetime import datetime
 
@@ -107,36 +106,22 @@ class ProxyHandler:
     def __init__(self):
         self._starting: bool = False
         self._start_time: Optional[datetime] = None
-        # Patterns to rewrite in HTML/JS responses
-        self._rewrite_patterns = [
-            # Absolute paths for assets, api, etc.
-            (re.compile(r'(["\'])/assets/', re.IGNORECASE), r'\1/comfyui/assets/'),
-            (re.compile(r'(["\'])/api/', re.IGNORECASE), r'\1/comfyui/api/'),
-            (re.compile(r'(["\'])/ws', re.IGNORECASE), r'\1/comfyui/ws'),
-            (re.compile(r'(["\'])/extensions/', re.IGNORECASE), r'\1/comfyui/extensions/'),
-            (re.compile(r'(["\'])/scripts/', re.IGNORECASE), r'\1/comfyui/scripts/'),
-            (re.compile(r'(["\'])/style\.css', re.IGNORECASE), r'\1/comfyui/style.css'),
-            (re.compile(r'(["\'])/favicon', re.IGNORECASE), r'\1/comfyui/favicon'),
-            # Handle src= and href= without quotes sometimes
-            (re.compile(r'src=/([^"\s>]+)', re.IGNORECASE), r'src=/comfyui/\1'),
-            (re.compile(r'href=/([^"\s>]+)', re.IGNORECASE), r'href=/comfyui/\1'),
-            # Fetch calls
-            (re.compile(r'fetch\(["\']/', re.IGNORECASE), r'fetch("/comfyui/'),
-            # WebSocket URLs
-            (re.compile(r'ws://([^/]+)/', re.IGNORECASE), r'ws://\1/comfyui/'),
-            (re.compile(r'wss://([^/]+)/', re.IGNORECASE), r'wss://\1/comfyui/'),
-        ]
 
-    def _rewrite_content(self, content: str, content_type: str) -> str:
-        """Rewrite URLs in HTML/JS content to use /comfyui prefix."""
-        # Only rewrite HTML and JavaScript
-        if not any(ct in content_type.lower() for ct in ['text/html', 'javascript', 'text/css']):
+    def _inject_base_tag(self, content: str, base_url: str) -> str:
+        """Inject a <base> tag into HTML to fix relative URLs."""
+        # Find the <head> tag and inject <base> right after it
+        head_pos = content.lower().find('<head')
+        if head_pos == -1:
             return content
 
-        for pattern, replacement in self._rewrite_patterns:
-            content = pattern.sub(replacement, content)
+        # Find the end of the <head> opening tag
+        head_end = content.find('>', head_pos)
+        if head_end == -1:
+            return content
 
-        return content
+        # Insert base tag after <head>
+        base_tag = f'\n<base href="{base_url}">\n'
+        return content[:head_end + 1] + base_tag + content[head_end + 1:]
 
     async def handle_request(self, request: Request) -> Response:
         """Handle an incoming request, starting container if needed."""
@@ -261,14 +246,15 @@ class ProxyHandler:
                 # Get response content
                 content = response.content
 
-                # Rewrite URLs in text responses
-                if any(ct in content_type.lower() for ct in ['text/html', 'javascript', 'text/css']):
+                # For HTML responses, inject <base> tag to fix relative URLs
+                if 'text/html' in content_type.lower():
                     try:
                         text_content = content.decode('utf-8')
-                        text_content = self._rewrite_content(text_content, content_type)
+                        # Inject base tag pointing to /comfyui/
+                        text_content = self._inject_base_tag(text_content, "/comfyui/")
                         content = text_content.encode('utf-8')
                     except UnicodeDecodeError:
-                        pass  # Binary content, don't rewrite
+                        pass  # Binary content, don't modify
 
                 # Build response headers
                 response_headers = {}

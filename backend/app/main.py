@@ -76,19 +76,6 @@ app.include_router(api.router)
 app.include_router(websocket.router)
 
 
-# Proxy routes - catch all requests to /comfyui/*
-@app.api_route("/comfyui/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-async def proxy_comfyui(request: Request, path: str):
-    """Proxy requests to ComfyUI."""
-    return await proxy_handler.handle_request(request)
-
-
-@app.api_route("/comfyui", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-async def proxy_comfyui_root(request: Request):
-    """Proxy requests to ComfyUI root."""
-    return await proxy_handler.handle_request(request)
-
-
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -97,41 +84,54 @@ async def health_check():
 
 
 # Serve frontend static files if they exist
-# In Docker: /app/static, in development: ../../static relative to this file
+# In Docker: /app/static, in development: ../static relative to this file
 STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "static"))
 if not os.path.isabs(STATIC_DIR):
     STATIC_DIR = os.path.abspath(STATIC_DIR)
 
+logger.info(f"Static directory: {STATIC_DIR}, exists: {os.path.exists(STATIC_DIR)}")
+
 if os.path.exists(STATIC_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
+    # Mount manager's static assets at /manager-assets to avoid conflict with ComfyUI
+    assets_dir = os.path.join(STATIC_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/manager-assets", StaticFiles(directory=assets_dir), name="manager-assets")
 
-    @app.get("/")
-    async def serve_frontend():
-        """Serve the frontend SPA."""
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
-    @app.get("/{path:path}")
-    async def serve_frontend_routes(path: str):
-        """Serve frontend for all non-API routes."""
-        # Don't intercept API, WebSocket, or comfyui proxy routes
-        if path.startswith(("api/", "ws", "comfyui", "health")):
-            return None
+# Proxy routes for ComfyUI - these need to be defined before the catch-all frontend route
+# Proxy all common ComfyUI paths
+@app.api_route("/comfyui/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+async def proxy_comfyui(request: Request, path: str):
+    """Proxy requests to ComfyUI."""
+    return await proxy_handler.handle_request(request)
 
+
+@app.api_route("/comfyui", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+async def proxy_comfyui_root(request: Request):
+    """Proxy requests to ComfyUI root."""
+    return await proxy_handler.handle_request(request)
+
+
+# Manager frontend routes
+@app.get("/")
+async def serve_frontend():
+    """Serve the manager frontend SPA."""
+    if os.path.exists(STATIC_DIR):
         index_path = os.path.join(STATIC_DIR, "index.html")
         if os.path.exists(index_path):
-            return FileResponse(index_path)
-
-        return {"error": "Not found"}
-else:
-    @app.get("/")
-    async def root():
-        """Root endpoint when no frontend is built."""
-        return {
-            "service": "ComfyUI Docker Manager",
-            "version": "1.0.0",
-            "api_docs": "/docs",
-            "status": "Frontend not built. Run 'npm run build' in frontend directory."
-        }
+            # Read and modify the index.html to use /manager-assets instead of /assets
+            with open(index_path, 'r') as f:
+                content = f.read()
+            content = content.replace('"/assets/', '"/manager-assets/')
+            content = content.replace("'/assets/", "'/manager-assets/")
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(content=content)
+    return {
+        "service": "ComfyUI Docker Manager",
+        "version": "1.0.0",
+        "api_docs": "/docs",
+        "status": "Frontend not built. Run 'npm run build' in frontend directory."
+    }
 
 
 if __name__ == "__main__":

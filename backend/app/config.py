@@ -20,6 +20,7 @@ class Config(BaseModel):
     # ComfyUI settings
     comfyui_host: str = "comfyui"  # Docker network hostname
     comfyui_port: int = 8188
+    comfyui_external_url: str = ""  # External URL for browser access (e.g., http://10.10.10.40:8188)
 
     # Idle detection settings
     idle_timeout_minutes: int = 30
@@ -35,6 +36,14 @@ class Config(BaseModel):
 
     @property
     def comfyui_url(self) -> str:
+        """Internal URL for backend to connect to ComfyUI."""
+        return f"http://{self.comfyui_host}:{self.comfyui_port}"
+
+    @property
+    def comfyui_browser_url(self) -> str:
+        """URL for browser to access ComfyUI directly."""
+        if self.comfyui_external_url:
+            return self.comfyui_external_url
         return f"http://{self.comfyui_host}:{self.comfyui_port}"
 
 
@@ -67,6 +76,7 @@ class ConfigManager:
             "DOCKER_SOCKET": "docker_socket",
             "COMFYUI_HOST": "comfyui_host",
             "COMFYUI_PORT": ("comfyui_port", int),
+            "COMFYUI_EXTERNAL_URL": "comfyui_external_url",
             "IDLE_TIMEOUT_MINUTES": ("idle_timeout_minutes", int),
             "POLL_INTERVAL_SECONDS": ("poll_interval_seconds", int),
             "AUTO_START_ENABLED": ("auto_start_enabled", lambda x: x.lower() == "true"),

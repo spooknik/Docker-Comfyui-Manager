@@ -1,7 +1,7 @@
 /**
  * Full-screen overlay shown when container is starting.
  */
-export default function StartingOverlay({ visible, onCancel }) {
+export default function StartingOverlay({ visible, onCancel, comfyuiUrl }) {
   if (!visible) return null;
 
   return (
@@ -20,7 +20,7 @@ export default function StartingOverlay({ visible, onCancel }) {
 
         <div className="space-y-3">
           <a
-            href="/comfyui"
+            href={comfyuiUrl || '/comfyui'}
             target="_blank"
             rel="noopener noreferrer"
             className="block w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"

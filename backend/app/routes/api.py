@@ -54,6 +54,7 @@ async def get_status() -> StatusResponse:
             "poll_interval_seconds": config.poll_interval_seconds,
             "auto_start_enabled": config.auto_start_enabled,
             "container_name": config.container_name,
+            "comfyui_url": config.comfyui_browser_url,
         }
     )
 

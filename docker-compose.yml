@@ -1,45 +1,42 @@
-# Example docker-compose for ComfyUI with Manager
-# This builds the managed image and runs it
-
-version: "3.8"
+# ComfyUI Docker Manager - Development docker-compose
+#
+# This file runs the backend and frontend separately for development.
+# Use docker-compose.prod.yml for production deployment.
 
 services:
-  comfyui:
+  backend:
     build:
-      context: .
-      dockerfile: Dockerfile.managed
-    container_name: comfyui-managed
-
-    # GPU access
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-    # Environment configuration
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - IDLE_TIMEOUT_SECONDS=300        # 5 minutes idle timeout
-      - IDLE_CHECK_INTERVAL=30           # Check every 30 seconds
-      # Adjust this command if your ComfyUI setup is different:
-      - COMFYUI_START_CMD=python /root/ComfyUI/main.py --listen 127.0.0.1 --port 8189
-
-    # Port mapping: external 8188 -> internal 8188 (manager)
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
-      - "8188:8188"
-
-    # Volume mounts - adjust paths for your setup
+      - "8080:8080"
     volumes:
-      # Models directory
-      - /path/to/models:/root/ComfyUI/models
-      # Output directory
-      - /path/to/output:/root/ComfyUI/output
-      # Custom nodes
-      - /path/to/custom_nodes:/root/ComfyUI/custom_nodes
-      # Optional: persist ComfyUI settings
-      - /path/to/user:/root/ComfyUI/user
-
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend/app:/app/app:ro
+      - manager-data:/app/data
+    environment:
+      - COMFYUI_CONTAINER_NAME=${COMFYUI_CONTAINER_NAME:-comfyui}
+      - COMFYUI_HOST=${COMFYUI_HOST:-comfyui}
+      - COMFYUI_PORT=${COMFYUI_PORT:-8188}
+      - IDLE_TIMEOUT_MINUTES=${IDLE_TIMEOUT_MINUTES:-30}
+      - AUTO_START_ENABLED=${AUTO_START_ENABLED:-true}
+    networks:
+      - comfyui-network
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  manager-data:
+
+networks:
+  comfyui-network:
+    external: true

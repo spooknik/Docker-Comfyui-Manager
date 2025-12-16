@@ -1,0 +1,56 @@
+# ComfyUI Docker Manager - Production docker-compose
+#
+# This file builds and runs the manager as a single container.
+# The frontend is built and served by the backend.
+#
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+#
+# Configuration:
+#   Copy .env.example to .env and adjust settings as needed.
+
+services:
+  comfyui-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: comfyui-manager
+    ports:
+      # Manager GUI and API
+      - "${MANAGER_PORT:-8080}:8080"
+    volumes:
+      # Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent configuration storage
+      - manager-data:/app/data
+    environment:
+      # Container to manage
+      - COMFYUI_CONTAINER_NAME=${COMFYUI_CONTAINER_NAME:-comfyui}
+      # ComfyUI connection settings
+      - COMFYUI_HOST=${COMFYUI_HOST:-comfyui}
+      - COMFYUI_PORT=${COMFYUI_PORT:-8188}
+      # Idle detection settings
+      - IDLE_TIMEOUT_MINUTES=${IDLE_TIMEOUT_MINUTES:-30}
+      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-30}
+      # Auto-start settings
+      - AUTO_START_ENABLED=${AUTO_START_ENABLED:-true}
+      - STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-120}
+    networks:
+      - comfyui-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  manager-data:
+    name: comfyui-manager-data
+
+networks:
+  comfyui-network:
+    # Use the same network as your ComfyUI container
+    # If ComfyUI uses a different network, change this name
+    external: true

@@ -11,63 +11,62 @@ Automatically manage your ComfyUI Docker container based on demand. Saves power 
 - **Configurable**: Adjust idle timeout, auto-start behavior, and more via the GUI
 - **Docker-native**: Runs as a Docker container alongside your ComfyUI container
 
-## Quick Start
+## Quick Start - Docker Hub
 
-### Prerequisites
+The easiest way to run the manager:
 
-- Docker and Docker Compose installed
-- ComfyUI running in a Docker container (e.g., [YanWenKun/ComfyUI-Docker](https://github.com/YanWenKun/ComfyUI-Docker))
-- Both containers on the same Docker network
-
-### Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/Docker-Comfyui-Manager.git
-   cd Docker-Comfyui-Manager
-   ```
-
-2. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Edit `.env` to match your ComfyUI setup:
-   ```env
-   # Name of your ComfyUI container
-   COMFYUI_CONTAINER_NAME=comfyui
-
-   # Idle timeout in minutes
-   IDLE_TIMEOUT_MINUTES=30
-   ```
-
-4. Create the Docker network (if not already created):
-   ```bash
-   docker network create comfyui-network
-   ```
-
-5. Build and start the manager:
-   ```bash
-   docker-compose -f docker-compose.prod.yml up -d
-   ```
-
-6. Access the manager at `http://localhost:8080`
-
-### Connecting to ComfyUI
-
-Make sure your ComfyUI container is on the same Docker network. Update your ComfyUI docker-compose to include:
-
-```yaml
-services:
-  comfyui:
-    # ... your existing config
-    networks:
-      - comfyui-network
-
-networks:
-  comfyui-network:
-    external: true
+```bash
+docker run -d \
+  --name comfyui-manager \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e COMFYUI_CONTAINER_NAME=your-comfyui-container-name \
+  -e COMFYUI_HOST=your-comfyui-container-name \
+  yourusername/comfyui-manager:latest
 ```
+
+Replace `your-comfyui-container-name` with your actual ComfyUI container name.
+
+## TrueNAS Installation
+
+### Via TrueNAS Apps UI
+
+1. Go to **Apps** > **Discover Apps** > **Custom App**
+2. Configure the app:
+   - **Application Name**: `comfyui-manager`
+   - **Image Repository**: `yourusername/comfyui-manager`
+   - **Image Tag**: `latest`
+3. **Port Forwarding**:
+   - Container Port: `8080` → Host Port: `8080`
+4. **Environment Variables**:
+   | Name | Value |
+   |------|-------|
+   | `COMFYUI_CONTAINER_NAME` | Your ComfyUI container name (find with `docker ps`) |
+   | `COMFYUI_HOST` | Same as container name |
+   | `IDLE_TIMEOUT_MINUTES` | `30` (or your preference) |
+5. **Storage**:
+   - Add Host Path: `/var/run/docker.sock` → `/var/run/docker.sock`
+   - (Optional) Add volume for `/app/data` to persist config
+6. Click **Install**
+
+### Finding Your ComfyUI Container Name
+
+SSH into TrueNAS and run:
+```bash
+docker ps | grep -i comfy
+```
+The first column is the container ID, the last column is the **container name**.
+
+### Network Configuration
+
+Both containers must be able to communicate. In TrueNAS, apps typically share the default network automatically. If not:
+
+1. Find your ComfyUI container's network:
+   ```bash
+   docker inspect your-comfyui-container | grep -A 5 "Networks"
+   ```
+
+2. When setting up the manager, use the same network or use the container's IP address for `COMFYUI_HOST`.
 
 ## Configuration
 
@@ -80,7 +79,6 @@ networks:
 | `POLL_INTERVAL_SECONDS` | `30` | How often to check queue status |
 | `AUTO_START_ENABLED` | `true` | Enable wake-on-access |
 | `STARTUP_TIMEOUT_SECONDS` | `120` | Max wait time for container start |
-| `MANAGER_PORT` | `8080` | Manager web UI port |
 
 All settings can also be changed via the web GUI.
 
@@ -88,7 +86,7 @@ All settings can also be changed via the web GUI.
 
 ### Web Dashboard
 
-Access the manager at `http://your-server:8080`:
+Access the manager at `http://your-truenas-ip:8080`:
 
 - **Status Card**: Shows container state with start/stop buttons
 - **Queue Status**: Displays running/pending jobs and idle timer
@@ -97,7 +95,7 @@ Access the manager at `http://your-server:8080`:
 
 ### Accessing ComfyUI
 
-When the container is running, click "Open ComfyUI" or go directly to `http://your-server:8080/comfyui`.
+When the container is running, click "Open ComfyUI" or go directly to `http://your-truenas-ip:8080/comfyui`.
 
 If the container is stopped and auto-start is enabled, it will automatically start when you access ComfyUI.
 
@@ -136,59 +134,70 @@ If the container is stopped and auto-start is enabled, it will automatically sta
 | WS | `/ws` | WebSocket for real-time updates |
 | ANY | `/comfyui/*` | Reverse proxy to ComfyUI |
 
-## Development
+## Building from Source
 
-### Backend
+### Prerequisites
 
+- Docker and Docker Compose
+- Node.js 20+ (for frontend development)
+- Python 3.11+ (for backend development)
+
+### Development
+
+**Backend:**
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8080
 ```
 
-### Frontend
-
+**Frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-The frontend dev server runs on port 3000 and proxies API requests to the backend.
-
-### Building
-
-Build the combined Docker image:
+### Build Docker Image
 
 ```bash
 docker build -t comfyui-manager .
 ```
 
-## TrueNAS Deployment
+### Push to Docker Hub
 
-1. Create a new Docker Compose application in TrueNAS
-2. Use the contents of `docker-compose.prod.yml`
-3. Add the environment variables from `.env.example`
-4. Make sure to mount the Docker socket: `/var/run/docker.sock`
-5. Ensure the manager is on the same network as ComfyUI
+```bash
+docker tag comfyui-manager yourusername/comfyui-manager:latest
+docker push yourusername/comfyui-manager:latest
+```
+
+Or use the GitHub Actions workflow (automatic on push to main).
 
 ## Troubleshooting
 
 ### Container not found
 
-- Verify the `COMFYUI_CONTAINER_NAME` matches your ComfyUI container name
-- Check that both containers are on the same Docker network
+- Verify `COMFYUI_CONTAINER_NAME` matches your ComfyUI container name exactly
+- Run `docker ps` to see all running containers and their names
+- Check the manager logs: `docker logs comfyui-manager`
 
 ### Cannot connect to ComfyUI
 
 - Ensure `COMFYUI_HOST` matches your ComfyUI container name
+- If containers are on different networks, use the container's IP address instead
 - Verify port 8188 is correct for your setup
 - Check that ComfyUI is actually running
 
 ### Docker socket permission denied
 
 - The manager container needs access to the Docker socket
+- Ensure `/var/run/docker.sock` is mounted correctly
 - On some systems, you may need to adjust socket permissions
+
+### Manager can't control ComfyUI container
+
+- Both containers must have access to the same Docker daemon
+- The Docker socket mount (`/var/run/docker.sock`) is required
 
 ## License
 

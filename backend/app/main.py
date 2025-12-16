@@ -97,7 +97,10 @@ async def health_check():
 
 
 # Serve frontend static files if they exist
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "static")
+# In Docker: /app/static, in development: ../../static relative to this file
+STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "static"))
+if not os.path.isabs(STATIC_DIR):
+    STATIC_DIR = os.path.abspath(STATIC_DIR)
 
 if os.path.exists(STATIC_DIR):
     app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")

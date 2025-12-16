@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // Base path for production - manager is served at /manager
+  base: '/manager/',
   server: {
     port: 3000,
     proxy: {
@@ -13,10 +15,6 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:8080',
         ws: true,
-      },
-      '/comfyui': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
       },
     },
   },

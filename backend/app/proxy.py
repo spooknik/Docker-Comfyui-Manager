@@ -68,6 +68,16 @@ def get_starting_page(message: str = "The container was stopped to save resource
             border-radius: 8px;
             font-size: 12px;
         }}
+        .manager-link {{
+            margin-top: 30px;
+        }}
+        .manager-link a {{
+            color: #4ade80;
+            text-decoration: none;
+        }}
+        .manager-link a:hover {{
+            text-decoration: underline;
+        }}
     </style>
     <script>
         // Check if ComfyUI is ready every 3 seconds
@@ -84,7 +94,6 @@ def get_starting_page(message: str = "The container was stopped to save resource
             }}
         }}
         setInterval(checkReady, 3000);
-        // Also check immediately after a short delay
         setTimeout(checkReady, 1000);
     </script>
 </head>
@@ -94,6 +103,9 @@ def get_starting_page(message: str = "The container was stopped to save resource
         <h1>ComfyUI is starting...</h1>
         <p>{message}</p>
         <div class="status">Checking status automatically...</div>
+        <div class="manager-link">
+            <a href="/manager">Open Manager Dashboard</a>
+        </div>
     </div>
 </body>
 </html>
@@ -106,22 +118,6 @@ class ProxyHandler:
     def __init__(self):
         self._starting: bool = False
         self._start_time: Optional[datetime] = None
-
-    def _inject_base_tag(self, content: str, base_url: str) -> str:
-        """Inject a <base> tag into HTML to fix relative URLs."""
-        # Find the <head> tag and inject <base> right after it
-        head_pos = content.lower().find('<head')
-        if head_pos == -1:
-            return content
-
-        # Find the end of the <head> opening tag
-        head_end = content.find('>', head_pos)
-        if head_end == -1:
-            return content
-
-        # Insert base tag after <head>
-        base_tag = f'\n<base href="{base_url}">\n'
-        return content[:head_end + 1] + base_tag + content[head_end + 1:]
 
     async def handle_request(self, request: Request) -> Response:
         """Handle an incoming request, starting container if needed."""
@@ -138,7 +134,6 @@ class ProxyHandler:
 
         # If container is running, try to proxy the request
         if container_state == ContainerState.RUNNING.value:
-            # Try to proxy - if it fails, show starting page
             response = await self._proxy_request(request)
             if response is not None:
                 return response
@@ -160,7 +155,18 @@ class ProxyHandler:
             return await self._start_and_wait(request)
         else:
             return HTMLResponse(
-                content="<h1>ComfyUI is stopped</h1><p>Auto-start is disabled. Start the container from the manager dashboard.</p>",
+                content="""
+                <html>
+                <head><title>ComfyUI Stopped</title></head>
+                <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee;">
+                    <div style="text-align: center;">
+                        <h1>ComfyUI is stopped</h1>
+                        <p>Auto-start is disabled.</p>
+                        <p><a href="/manager" style="color: #4ade80;">Open Manager Dashboard</a> to start it manually.</p>
+                    </div>
+                </body>
+                </html>
+                """,
                 status_code=503
             )
 
@@ -172,17 +178,26 @@ class ProxyHandler:
 
             logger.info("Auto-starting ComfyUI container due to incoming request")
 
-            # Start container
             result = await docker_manager.start_container()
 
             if not result.get("success"):
                 self._starting = False
                 return HTMLResponse(
-                    content=f"<h1>Failed to start ComfyUI</h1><p>{result.get('error')}</p>",
+                    content=f"""
+                    <html>
+                    <head><title>Start Failed</title></head>
+                    <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee;">
+                        <div style="text-align: center;">
+                            <h1>Failed to start ComfyUI</h1>
+                            <p style="color: #f87171;">{result.get('error')}</p>
+                            <p><a href="/manager" style="color: #4ade80;">Open Manager Dashboard</a></p>
+                        </div>
+                    </body>
+                    </html>
+                    """,
                     status_code=500
                 )
 
-            # Start background task to wait for ready and reset _starting flag
             asyncio.create_task(self._wait_for_ready())
 
         return HTMLResponse(
@@ -207,10 +222,8 @@ class ProxyHandler:
         """Proxy the request to ComfyUI. Returns None if connection fails."""
         config = get_config()
 
-        # Build target URL - strip /comfyui prefix
+        # Use the request path directly - no prefix stripping needed
         path = request.url.path
-        if path.startswith("/comfyui"):
-            path = path[8:]  # Remove /comfyui prefix
         if not path:
             path = "/"
 
@@ -220,10 +233,8 @@ class ProxyHandler:
 
         logger.debug(f"Proxying to: {target_url}")
 
-        # Get request body
         body = await request.body()
 
-        # Build headers (filter out hop-by-hop headers)
         headers = {}
         hop_by_hop = {"connection", "keep-alive", "transfer-encoding", "te", "trailers", "upgrade"}
         for key, value in request.headers.items():
@@ -240,31 +251,12 @@ class ProxyHandler:
                     follow_redirects=False
                 )
 
-                # Get content type
-                content_type = response.headers.get("content-type", "")
-
-                # Get response content
                 content = response.content
 
-                # For HTML responses, inject <base> tag to fix relative URLs
-                if 'text/html' in content_type.lower():
-                    try:
-                        text_content = content.decode('utf-8')
-                        # Inject base tag pointing to /comfyui/
-                        text_content = self._inject_base_tag(text_content, "/comfyui/")
-                        content = text_content.encode('utf-8')
-                    except UnicodeDecodeError:
-                        pass  # Binary content, don't modify
-
-                # Build response headers
                 response_headers = {}
                 for key, value in response.headers.items():
                     if key.lower() not in hop_by_hop:
-                        # Update content-length if we modified the content
-                        if key.lower() == "content-length":
-                            response_headers[key] = str(len(content))
-                        else:
-                            response_headers[key] = value
+                        response_headers[key] = value
 
                 return Response(
                     content=content,

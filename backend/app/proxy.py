@@ -10,7 +10,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .config import get_config
 from .docker_manager import docker_manager, ContainerState
@@ -19,15 +19,15 @@ from .comfyui_client import comfyui_client
 logger = logging.getLogger(__name__)
 
 
-# HTML page shown while container is starting
-STARTING_PAGE = """
+def get_starting_page(message: str = "The container was stopped to save resources. Please wait while it starts up.") -> str:
+    """Generate the starting page HTML with a custom message."""
+    return f"""
 <!DOCTYPE html>
 <html>
 <head>
     <title>ComfyUI - Starting...</title>
-    <meta http-equiv="refresh" content="5">
     <style>
-        body {
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
             justify-content: center;
@@ -36,12 +36,12 @@ STARTING_PAGE = """
             margin: 0;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             color: #eee;
-        }
-        .container {
+        }}
+        .container {{
             text-align: center;
             padding: 40px;
-        }
-        .spinner {
+        }}
+        .spinner {{
             width: 50px;
             height: 50px;
             border: 4px solid rgba(255,255,255,0.1);
@@ -49,33 +49,51 @@ STARTING_PAGE = """
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        h1 {
+        }}
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        h1 {{
             font-size: 24px;
             margin-bottom: 10px;
-        }
-        p {
+        }}
+        p {{
             color: #aaa;
             font-size: 14px;
-        }
-        .status {
+        }}
+        .status {{
             margin-top: 20px;
             padding: 10px 20px;
             background: rgba(255,255,255,0.1);
             border-radius: 8px;
             font-size: 12px;
-        }
+        }}
     </style>
+    <script>
+        // Check if ComfyUI is ready every 3 seconds
+        async function checkReady() {{
+            try {{
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                if (data.queue && data.queue.connected) {{
+                    // ComfyUI is ready, reload to proxy through
+                    window.location.reload();
+                }}
+            }} catch (e) {{
+                console.log('Still waiting...', e);
+            }}
+        }}
+        setInterval(checkReady, 3000);
+        // Also check immediately after a short delay
+        setTimeout(checkReady, 1000);
+    </script>
 </head>
 <body>
     <div class="container">
         <div class="spinner"></div>
         <h1>ComfyUI is starting...</h1>
-        <p>The container was stopped to save resources. Please wait while it starts up.</p>
-        <div class="status">This page will refresh automatically</div>
+        <p>{message}</p>
+        <div class="status">Checking status automatically...</div>
     </div>
 </body>
 </html>
@@ -100,25 +118,33 @@ class ProxyHandler:
         status = docker_manager.get_status()
         container_state = status.get("state")
 
-        # If container is running, proxy the request
+        logger.debug(f"Proxy request: state={container_state}, starting={self._starting}")
+
+        # If container is running, try to proxy the request
         if container_state == ContainerState.RUNNING.value:
-            # Verify ComfyUI is actually responding
-            if await comfyui_client.is_healthy():
-                return await self._proxy_request(request)
-            else:
-                # Container running but ComfyUI not ready yet
-                return HTMLResponse(content=STARTING_PAGE, status_code=503)
+            # Try to proxy - if it fails, show starting page
+            response = await self._proxy_request(request)
+            if response is not None:
+                return response
+            # Proxy failed, ComfyUI not ready yet
+            return HTMLResponse(
+                content=get_starting_page("Container is running, waiting for ComfyUI to initialize..."),
+                status_code=503
+            )
 
         # If container is starting, show waiting page
         if container_state == ContainerState.STARTING.value or self._starting:
-            return HTMLResponse(content=STARTING_PAGE, status_code=503)
+            return HTMLResponse(
+                content=get_starting_page("Container is starting up..."),
+                status_code=503
+            )
 
         # Container is stopped - start it if auto-start is enabled
         if config.auto_start_enabled:
             return await self._start_and_wait(request)
         else:
             return HTMLResponse(
-                content="<h1>ComfyUI is stopped</h1><p>Auto-start is disabled.</p>",
+                content="<h1>ComfyUI is stopped</h1><p>Auto-start is disabled. Start the container from the manager dashboard.</p>",
                 status_code=503
             )
 
@@ -130,7 +156,7 @@ class ProxyHandler:
 
             logger.info("Auto-starting ComfyUI container due to incoming request")
 
-            # Start container in background
+            # Start container
             result = await docker_manager.start_container()
 
             if not result.get("success"):
@@ -140,10 +166,13 @@ class ProxyHandler:
                     status_code=500
                 )
 
-            # Start background task to wait for ready
+            # Start background task to wait for ready and reset _starting flag
             asyncio.create_task(self._wait_for_ready())
 
-        return HTMLResponse(content=STARTING_PAGE, status_code=503)
+        return HTMLResponse(
+            content=get_starting_page("Starting the container..."),
+            status_code=503
+        )
 
     async def _wait_for_ready(self) -> None:
         """Wait for ComfyUI to become ready."""
@@ -158,8 +187,8 @@ class ProxyHandler:
         finally:
             self._starting = False
 
-    async def _proxy_request(self, request: Request) -> Response:
-        """Proxy the request to ComfyUI."""
+    async def _proxy_request(self, request: Request) -> Optional[Response]:
+        """Proxy the request to ComfyUI. Returns None if connection fails."""
         config = get_config()
 
         # Build target URL
@@ -184,7 +213,7 @@ class ProxyHandler:
                 headers[key] = value
 
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.request(
                     method=request.method,
                     url=target_url,
@@ -205,13 +234,12 @@ class ProxyHandler:
                     headers=response_headers
                 )
 
-        except httpx.TimeoutException:
-            return HTMLResponse(
-                content="<h1>Request Timeout</h1><p>ComfyUI took too long to respond.</p>",
-                status_code=504
-            )
         except httpx.ConnectError:
-            return HTMLResponse(content=STARTING_PAGE, status_code=503)
+            logger.debug("Cannot connect to ComfyUI - not ready yet")
+            return None
+        except httpx.TimeoutException:
+            logger.warning("Timeout connecting to ComfyUI")
+            return None
         except Exception as e:
             logger.error(f"Proxy error: {e}")
             return HTMLResponse(

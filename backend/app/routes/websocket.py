@@ -66,6 +66,7 @@ class ConnectionManager:
                 container_status = docker_manager.get_status()
                 queue_status = await comfyui_client.get_queue_status()
                 idle_info = idle_monitor.get_idle_info()
+                config = get_config()
 
                 message = {
                     "type": "status_update",
@@ -73,7 +74,12 @@ class ConnectionManager:
                     "data": {
                         "container": container_status,
                         "queue": queue_status.to_dict(),
-                        "idle": idle_info
+                        "idle": idle_info,
+                        "config": {
+                            "idle_timeout_minutes": config.idle_timeout_minutes,
+                            "auto_start_enabled": config.auto_start_enabled,
+                            "comfyui_url": config.comfyui_browser_url,
+                        }
                     }
                 }
 
@@ -114,6 +120,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "config": {
                     "idle_timeout_minutes": config.idle_timeout_minutes,
                     "auto_start_enabled": config.auto_start_enabled,
+                    "comfyui_url": config.comfyui_browser_url,
                 }
             }
         })

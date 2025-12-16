@@ -5,12 +5,13 @@ Automatically starts the container when a request arrives.
 
 import asyncio
 import logging
+import re
 from typing import Optional
 from datetime import datetime
 
 import httpx
 from fastapi import Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from .config import get_config
 from .docker_manager import docker_manager, ContainerState
@@ -106,6 +107,36 @@ class ProxyHandler:
     def __init__(self):
         self._starting: bool = False
         self._start_time: Optional[datetime] = None
+        # Patterns to rewrite in HTML/JS responses
+        self._rewrite_patterns = [
+            # Absolute paths for assets, api, etc.
+            (re.compile(r'(["\'])/assets/', re.IGNORECASE), r'\1/comfyui/assets/'),
+            (re.compile(r'(["\'])/api/', re.IGNORECASE), r'\1/comfyui/api/'),
+            (re.compile(r'(["\'])/ws', re.IGNORECASE), r'\1/comfyui/ws'),
+            (re.compile(r'(["\'])/extensions/', re.IGNORECASE), r'\1/comfyui/extensions/'),
+            (re.compile(r'(["\'])/scripts/', re.IGNORECASE), r'\1/comfyui/scripts/'),
+            (re.compile(r'(["\'])/style\.css', re.IGNORECASE), r'\1/comfyui/style.css'),
+            (re.compile(r'(["\'])/favicon', re.IGNORECASE), r'\1/comfyui/favicon'),
+            # Handle src= and href= without quotes sometimes
+            (re.compile(r'src=/([^"\s>]+)', re.IGNORECASE), r'src=/comfyui/\1'),
+            (re.compile(r'href=/([^"\s>]+)', re.IGNORECASE), r'href=/comfyui/\1'),
+            # Fetch calls
+            (re.compile(r'fetch\(["\']/', re.IGNORECASE), r'fetch("/comfyui/'),
+            # WebSocket URLs
+            (re.compile(r'ws://([^/]+)/', re.IGNORECASE), r'ws://\1/comfyui/'),
+            (re.compile(r'wss://([^/]+)/', re.IGNORECASE), r'wss://\1/comfyui/'),
+        ]
+
+    def _rewrite_content(self, content: str, content_type: str) -> str:
+        """Rewrite URLs in HTML/JS content to use /comfyui prefix."""
+        # Only rewrite HTML and JavaScript
+        if not any(ct in content_type.lower() for ct in ['text/html', 'javascript', 'text/css']):
+            return content
+
+        for pattern, replacement in self._rewrite_patterns:
+            content = pattern.sub(replacement, content)
+
+        return content
 
     async def handle_request(self, request: Request) -> Response:
         """Handle an incoming request, starting container if needed."""
@@ -118,7 +149,7 @@ class ProxyHandler:
         status = docker_manager.get_status()
         container_state = status.get("state")
 
-        logger.debug(f"Proxy request: state={container_state}, starting={self._starting}")
+        logger.debug(f"Proxy request: path={request.url.path}, state={container_state}, starting={self._starting}")
 
         # If container is running, try to proxy the request
         if container_state == ContainerState.RUNNING.value:
@@ -191,7 +222,7 @@ class ProxyHandler:
         """Proxy the request to ComfyUI. Returns None if connection fails."""
         config = get_config()
 
-        # Build target URL
+        # Build target URL - strip /comfyui prefix
         path = request.url.path
         if path.startswith("/comfyui"):
             path = path[8:]  # Remove /comfyui prefix
@@ -201,6 +232,8 @@ class ProxyHandler:
         target_url = f"{config.comfyui_url}{path}"
         if request.url.query:
             target_url += f"?{request.url.query}"
+
+        logger.debug(f"Proxying to: {target_url}")
 
         # Get request body
         body = await request.body()
@@ -213,7 +246,7 @@ class ProxyHandler:
                 headers[key] = value
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.request(
                     method=request.method,
                     url=target_url,
@@ -222,14 +255,33 @@ class ProxyHandler:
                     follow_redirects=False
                 )
 
+                # Get content type
+                content_type = response.headers.get("content-type", "")
+
+                # Get response content
+                content = response.content
+
+                # Rewrite URLs in text responses
+                if any(ct in content_type.lower() for ct in ['text/html', 'javascript', 'text/css']):
+                    try:
+                        text_content = content.decode('utf-8')
+                        text_content = self._rewrite_content(text_content, content_type)
+                        content = text_content.encode('utf-8')
+                    except UnicodeDecodeError:
+                        pass  # Binary content, don't rewrite
+
                 # Build response headers
                 response_headers = {}
                 for key, value in response.headers.items():
                     if key.lower() not in hop_by_hop:
-                        response_headers[key] = value
+                        # Update content-length if we modified the content
+                        if key.lower() == "content-length":
+                            response_headers[key] = str(len(content))
+                        else:
+                            response_headers[key] = value
 
                 return Response(
-                    content=response.content,
+                    content=content,
                     status_code=response.status_code,
                     headers=response_headers
                 )

@@ -74,7 +74,7 @@ function App() {
         {containerRunning && (
           <div className="mb-6">
             <a
-              href={status?.config?.comfyui_url || '/comfyui'}
+              href="/comfyui"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md"
@@ -149,7 +149,7 @@ function App() {
       <StartingOverlay
         visible={showStarting}
         onCancel={() => setShowStarting(false)}
-        comfyuiUrl={status?.config?.comfyui_url}
+        comfyuiUrl="/comfyui"
       />
     </div>
   );
